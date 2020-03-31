@@ -1,7 +1,7 @@
 ---
 title: "Lab 07 | R continued"
 author: "Sean Mussenden"
-date: "03/31/2020"
+date: "10/26/2019"
 output:
   html_document:
     toc: true
@@ -81,7 +81,13 @@ We're also going to load two new packages: [mapview](https://r-spatial.github.io
 ```{r}
 
 # Load Tidyverse, janitor and arcos, tidycensus, mapview, ggthemes, scales
-
+library(tidyverse)
+library(janitor)
+library(arcos)
+library(tidycensus)
+library(scales)
+library(mapview)
+library(ggthemes)
 
 ```
 
@@ -138,10 +144,6 @@ not_in_population <- arcos_county_pills_per_year %>%
 
 **Task**: Examine the not_in_population table.  Write a few sentences explaining patterns you see in which records show up in the pills table, but not in population table.  How could this cause problems for you in the future?
 
-```{r}
-# Comment
-```
-
 Okay, let's put them together. Remember we need to join them on both countyfips and year.  We're also going to throw in buyer_county and buyer_state, which exist in both tables, so we don't get the buyer_county.x and buyer_county.y weirdness.
 
 We're going to inner join here with population on the left side, because we want a consistent set of U.S. counties for when we do mapping later. And we're going to make a judgment call that it's okay to exclude pill shipments for which there were no assigned counties, which is what we're doing when we do the left join.
@@ -176,7 +178,7 @@ First, we need to store our API Key. You can use mine for now, but best to [get 
 census_api_key("549950d36c22ff16455fe196bbbd01d63cfbe6cf")
 
 # If you need to look up variables, this is how you do it
-acs_variables <- load_variables(2017, "acs5" )
+# acs_variables <- load_variables(2017, "acs5" )
 
 ```
 
@@ -184,7 +186,7 @@ The tidycensus allows us to pull in information from the census by many differen
 
 We're going to pull in four sets of data here.
 
-First, lets pull in county and state.  The "variable" here is just a count of total population, but it doesn't really matter.  We just want the geometry, which we get by selecting geometry=TRUE.  
+First, lets pull in county and state.  The "variable" here is just a count of total population, but it doesn't really matter.  We just want the geometry, which we get by selecting gemoetry=TRUE.  
 
 ```{r}
 
@@ -341,7 +343,7 @@ Okay, first, let's build an interactive version of the map.
 **Task**: Using the mapview() function we used above, show an interactive map that shades each state according to the pills per person rate in 2009.
 
 ```{r}
-# interactive map code here
+mapview(geo_pills_population_state_2009, zcol = "pills_per_person", legend = TRUE)
 ```
 
 Now let's plot a basic version.
@@ -350,14 +352,19 @@ Now let's plot a basic version.
 geo_pills_population_state_2009 %>%
   ggplot(aes(fill = pills_per_person)) +
   geom_sf()
+
 ```
 
 **Task**: stylize the map, making it look like the final population map we created in the first part of the exercise with two changes: *center the legend on the bottom of the graphic*, instead of at right. You might try searching for legend.position on Google. And write up a headline, subtitle and source appropriate for the chart.  
 
 ```{r}
-
-# Map code here
-
+geo_pills_population_state_2009 %>%
+  ggplot(aes(fill = pills_per_person)) +
+  geom_sf(lwd = 0) +
+  theme_map() +
+  labs(fill='Pills per Person (2009)',title="Appalachia saw high rates of opioid shipments", subtitle = "In 2009, the number of opioids shipped per person was highest in West Virginia, Kentucky", caption = "Source: ARCOS database") +
+  theme(legend.position="bottom") +
+  scale_fill_viridis_c(option = "magma",labels = comma)
 ```
 
 ## Facets
@@ -407,23 +414,33 @@ geo_pills_population_state %>%
 
 ```{r}
 
-# Map code here
 geo_pills_population_state %>%
   ggplot(aes(fill = pills_per_person)) +
   facet_wrap(~year, nrow=2) +
   geom_sf(lwd = 0) +
   theme_map() +
-  labs(fill='Pills per Person',title="", subtitle = "", caption = "Source: ARCOS database") +
+  labs(fill='Pills per Person',title="Starting slow, pill shipments rapidly increase between 2006 and 2012 ", subtitle = "Pills per person shipped to each state, 2006 to 2012", caption = "Source: ARCOS database") +
   theme(legend.position="bottom") +
   scale_fill_viridis_c(option = "magma",labels = comma)
 
 ```
 
-**Task**: Make a single INTERACTIVE map that is colored based on the number of pills per person in each county in 2009. Provide a short writeup on what you find.What trends do you see, beyond Appalachia? Note: the map will probably open in a web browser. 
+**Task**: Make a single INTERACTIVE map that is colored based on the number of pills per person in each county in 2009. Provide a short writeup on what you find.What trends do you see, beyond Appalachia? Note: the map will probably open in a web broswer.
 
 ```{r}
 
-# Map Code Here
+# Filter pills population table just for 2009.  
+pills_population_county_2009 <- pills_population %>%
+  filter(year == 2009) %>%
+  group_by(countyfips, buyer_county, buyer_state) %>%
+  summarise(pills_per_person = dosage_unit/population)
+
+# Join it to county shifted shapefile
+geo_pills_population_county_2009 <- county_geodata_shifted %>%
+  left_join(pills_population_county_2009, by=c("GEOID" = "countyfips"))
+
+# View interactive map
+mapview(geo_pills_population_county_2009, zcol = "pills_per_person", legend = TRUE)
 
 ```
 
@@ -431,7 +448,31 @@ geo_pills_population_state %>%
 
 
 ```{r}
-# map code here
+
+# Filter pills population table just for Maryland.  
+pills_population_county_maryland <- pills_population %>%
+  filter(buyer_state == "MD") %>%
+  group_by(countyfips, buyer_county, buyer_state, year) %>%
+  summarise(total_pills=sum(dosage_unit, na.rm = TRUE),
+            total_population=sum(population, na.rm=TRUE)) %>%
+  mutate(pills_per_person=total_pills/total_population)
+
+# Join it to county shifted shapefile
+geo_pills_population_county_maryland <- county_geodata_shifted %>%
+  inner_join(pills_population_county_maryland, by=c("GEOID" = "countyfips"))
+
+# Draw the facet map
+geo_pills_population_county_maryland %>%
+  ggplot(aes(fill = pills_per_person)) +
+  facet_wrap(~year, nrow=2) +
+  geom_sf(lwd = 0) +
+  theme_map() +
+  labs(fill='Pills per Person',title="Starting slow, pill shipments rapidly increase between 2006 and 2012 ", subtitle = "Pills per person shipped to Maryland counties, 2006 to 2012", caption = "Source: ARCOS database") +
+  theme(legend.position="bottom") +
+  scale_fill_viridis_c(option = "magma",labels = comma)
+
+
+
 
 ```
 
